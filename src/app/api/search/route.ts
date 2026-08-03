@@ -10,6 +10,9 @@
 
 import { searchShopping } from "@/features/shopping";
 
+// 다나와 크롤링이 포함되어 응답이 걸릴 수 있으므로 실행 시간을 넉넉히 둔다. (초)
+export const maxDuration = 60;
+
 export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);
   const keyword = (searchParams.get("keyword") ?? "").trim();

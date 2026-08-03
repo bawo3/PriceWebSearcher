@@ -7,6 +7,9 @@
 
 import { fetchDanawaMallPrices } from "@/features/shopping/danawa-detail";
 
+// 다나와 상세 크롤링 시간 여유 (초)
+export const maxDuration = 60;
+
 export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);
   const pcode = (searchParams.get("pcode") ?? "").trim();

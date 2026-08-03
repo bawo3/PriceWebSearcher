@@ -112,9 +112,11 @@ function dedupeMallPrices(list: MallPrice[]): MallPrice[] {
 }
 
 /** 한 행에서 판매몰 이름을 알아낸다. (로고 alt 우선, 없으면 텍스트에서 추정) */
+// row 는 $(element) 의 결과(Cheerio 노드). cheerio 버전별 제네릭 차이를 피하려고 느슨히 받는다.
 function detectMallName(
   $: cheerio.CheerioAPI,
-  row: cheerio.Cheerio<never>,
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  row: cheerio.Cheerio<any>,
   rowText: string,
   productTitle?: string,
 ): string {
