@@ -34,19 +34,44 @@ export function isAccessory(product: NormalizedResult): boolean {
 /**
  * 결과 목록에 화면 필터를 적용한다.
  * @param excludeAccessory 액세서리 제외 여부
- * @param maxPrice 이 가격을 넘는 상품 제외 (0 이면 제한 없음)
- * @param excludeWords 사용자가 지정한 제외 단어들
+ * @param minPrice 이 가격보다 싼 상품 제외 (0 이면 하한 없음)
+ * @param maxPrice 이 가격을 넘는 상품 제외 (0 이면 상한 없음)
+ * @param includeWords 이 단어를 "모두" 포함한 상품만 통과 (비어 있으면 조건 없음)
+ * @param excludeWords 사용자가 지정한 제외 단어들 (하나라도 있으면 제외)
  */
 export function applyShoppingFilters(
   results: NormalizedResult[],
-  options: { excludeAccessory: boolean; maxPrice: number; excludeWords: string[] },
+  options: {
+    excludeAccessory: boolean;
+    minPrice: number;
+    maxPrice: number;
+    includeWords: string[];
+    excludeWords: string[];
+  },
 ): NormalizedResult[] {
   return results.filter((product) => {
     if (options.excludeAccessory && isAccessory(product)) return false;
+
+    // 가격 하한/상한 (0 이면 그 방향 제한 없음)
+    if (options.minPrice > 0 && product.price < options.minPrice) return false;
     if (options.maxPrice > 0 && product.price > options.maxPrice) return false;
-    if (options.excludeWords.some((word) => word && product.title.includes(word))) {
+
+    // 대소문자 구분 없이 비교하려고 제목을 소문자로 맞춰 둔다. (예: Apple = apple)
+    const title = product.title.toLowerCase();
+
+    // 포함 단어: 적은 단어가 "모두" 들어있어야 통과 (AND 조건)
+    if (
+      options.includeWords.length > 0 &&
+      !options.includeWords.every((word) => title.includes(word.toLowerCase()))
+    ) {
       return false;
     }
+
+    // 제외 단어: 하나라도 들어있으면 제외 (OR 조건)
+    if (options.excludeWords.some((word) => word && title.includes(word.toLowerCase()))) {
+      return false;
+    }
+
     return true;
   });
 }

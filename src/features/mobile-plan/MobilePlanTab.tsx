@@ -118,17 +118,14 @@ export function MobilePlanTab() {
           onClick={handleCollect}
           disabled={isCollecting}
         >
-          {isCollecting ? "가져오는 중..." : "📥 최신 요금제 가져오기 (4개 사이트 크롤링)"}
+          {isCollecting ? "가져오는 중..." : "📥 최신 요금제 가져오기"}
         </button>
       </div>
       {collectMessage && <p className="info-text">{collectMessage}</p>}
 
       {/* 아직 수집 데이터가 없을 때 안내 */}
       {!collectedAt && !isCollecting && (
-        <div className="hint-box">
-          아직 가져온 요금제가 없습니다. 위의 <b>가져오기</b> 버튼을 눌러
-          알뜰폰허브·폰비·모요·아요의 요금제를 수집해 주세요.
-        </div>
+        <div className="hint-box">아직 가져온 요금제가 없습니다.</div>
       )}
 
       {/* 필터 패널 */}

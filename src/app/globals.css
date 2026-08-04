@@ -465,6 +465,19 @@ select {
   min-width: 180px;
   width: auto;
 }
+/* 가격 범위 사이의 물결 표시(~) */
+.price-sep {
+  color: #9ca3af;
+  font-weight: 700;
+}
+/* 필터/정렬 줄 앞의 작은 라벨 (예: "정렬") */
+.filter-label {
+  align-self: center;
+  margin-right: 2px;
+  font-size: 12px;
+  font-weight: 700;
+  color: #6b7280;
+}
 
 /* 최근 검색어 헤더 */
 .recent-head {

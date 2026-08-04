@@ -19,6 +19,9 @@ export async function GET(request: Request) {
   const previewOnly = searchParams.get("preview") === "1";
   // 정렬: sort=priceAsc 면 최저가순, 그 외엔 관련도순(기본)
   const sortBy = searchParams.get("sort") === "priceAsc" ? "priceAsc" : "relevance";
+  // 가격 하한/상한 — 다나와 요청에 실어 보내 범위에 맞는 상품만 받아온다. (0=제한없음)
+  const minPrice = Number(searchParams.get("minPrice")) || 0;
+  const maxPrice = Number(searchParams.get("maxPrice")) || 0;
 
   // 검색어가 없으면 빈 결과를 돌려준다.
   if (keyword.length === 0) {
@@ -26,7 +29,11 @@ export async function GET(request: Request) {
   }
 
   try {
-    const { results, bySource } = await searchShopping({ keyword }, previewOnly, sortBy);
+    const { results, bySource } = await searchShopping(
+      { keyword, filters: { minPrice, maxPrice } },
+      previewOnly,
+      sortBy,
+    );
     return Response.json({ keyword, results, bySource });
   } catch (error) {
     console.error("[search API] 오류:", error);

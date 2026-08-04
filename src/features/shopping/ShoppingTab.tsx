@@ -4,7 +4,8 @@
 // -----------------------------------------------------------------------------
 // - 실시간 자동완성(↑↓ 키 선택) + 최근 검색어
 // - 썸네일 이미지, 로딩 스켈레톤, 찜(즐겨찾기)
-// - 화면 필터(액세서리 제외 / 가격 상한 / 제외 단어) + 정렬
+// - 상세 검색: 가격 범위(하한~상한, 다나와에 직접 반영) / 포함·제외 단어 / 액세서리 제외
+// - 정렬 6종(관련도·최저가·최고가·리뷰많은순·평점높은순·최신순) — 화면에서 즉시 재정렬
 // - 스마트 추천 TOP3 (가성비/균형/프리미엄)
 // - 상품별 몰별 최저가 비교 + 실제가 직접 확인 링크
 // =============================================================================
@@ -21,6 +22,19 @@ import {
   toggleFavorite,
 } from "./storage";
 
+/** 정렬 방식: 관련도순 / 최저가순 / 최고가순 / 리뷰많은순 / 평점높은순 / 최신순 */
+type SortKey = "relevance" | "priceAsc" | "priceDesc" | "reviewDesc" | "ratingDesc" | "newest";
+
+/** 정렬 칩에 표시할 이름 (버튼 자동 생성용) */
+const SORT_OPTIONS: { key: SortKey; label: string }[] = [
+  { key: "relevance", label: "관련도순" },
+  { key: "priceAsc", label: "최저가순" },
+  { key: "priceDesc", label: "최고가순" },
+  { key: "reviewDesc", label: "리뷰많은순" },
+  { key: "ratingDesc", label: "평점높은순" },
+  { key: "newest", label: "최신순" },
+];
+
 export function ShoppingTab() {
   // --- 검색/자동완성 상태 ---
   const [keyword, setKeyword] = useState("");
@@ -33,11 +47,14 @@ export function ShoppingTab() {
   const [searchResults, setSearchResults] = useState<NormalizedResult[]>([]);
   const [isSearching, setIsSearching] = useState(false);
   const [hasSearched, setHasSearched] = useState(false);
-  const [sortBy, setSortBy] = useState<"relevance" | "priceAsc">("relevance");
+  // 정렬: 관련도순(기본) / 최저가순 / 최고가순 — 모두 화면에서 즉시 정렬 (재검색 없음)
+  const [sortBy, setSortBy] = useState<SortKey>("relevance");
 
   // --- 필터 상태 ---
   const [excludeAccessory, setExcludeAccessory] = useState(false); // 액세서리 제외
+  const [minPrice, setMinPrice] = useState(0); // 가격 하한(0=제한없음)
   const [maxPrice, setMaxPrice] = useState(0); // 가격 상한(0=제한없음)
+  const [includeWordsInput, setIncludeWordsInput] = useState(""); // 포함 단어(쉼표 구분)
   const [excludeWordsInput, setExcludeWordsInput] = useState(""); // 제외 단어(쉼표 구분)
 
   // --- 찜 상태 ---
@@ -75,11 +92,10 @@ export function ShoppingTab() {
     };
   }, [keyword]);
 
-  // [정식 검색]
-  async function handleSearch(keywordOverride?: string, sortOverride?: "relevance" | "priceAsc") {
+  // [정식 검색] 가격 하한/상한을 함께 보내 다나와가 그 범위로 걸러 주도록 한다.
+  async function handleSearch(keywordOverride?: string) {
     const currentKeyword = (keywordOverride ?? keyword).trim();
     if (currentKeyword.length < 2) return;
-    const currentSort = sortOverride ?? sortBy;
 
     setShowSuggestions(false);
     setShowFavoritesOnly(false); // 검색하면 찜 모드 해제
@@ -87,10 +103,13 @@ export function ShoppingTab() {
     setHasSearched(true);
     setRecentKeywords(addRecentKeyword(currentKeyword)); // 최근 검색어 저장
 
+    // 가격범위를 쿼리로 붙인다. (0이면 그 방향 제한 없음)
+    const params = new URLSearchParams({ keyword: currentKeyword });
+    if (minPrice > 0) params.set("minPrice", String(minPrice));
+    if (maxPrice > 0) params.set("maxPrice", String(maxPrice));
+
     try {
-      const response = await fetch(
-        `/api/search?keyword=${encodeURIComponent(currentKeyword)}&sort=${currentSort}`,
-      );
+      const response = await fetch(`/api/search?${params.toString()}`);
       const data = await response.json();
       setSearchResults(data.results ?? []);
     } catch {
@@ -99,6 +118,16 @@ export function ShoppingTab() {
       setIsSearching(false);
     }
   }
+
+  // 가격대(하한/상한)를 바꾸면, 이미 검색한 상태에서는 그 범위로 다나와에 다시 조회한다.
+  //   (입력 중 과도한 재요청을 막으려 700ms 기다렸다가 실행)
+  useEffect(() => {
+    if (!hasSearched) return;
+    const timer = setTimeout(() => handleSearch(), 700);
+    return () => clearTimeout(timer);
+    // handleSearch 는 매 렌더 새로 만들어지므로 의존성에서 제외한다. (가격 변경에만 반응)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [minPrice, maxPrice]);
 
   // [추천어/최근어 클릭]
   function handleSelectSuggestion(text: string) {
@@ -127,10 +156,9 @@ export function ShoppingTab() {
     }
   }
 
-  // [정렬 변경]
-  function handleChangeSort(newSort: "relevance" | "priceAsc") {
+  // [정렬 변경] 화면에서 즉시 다시 정렬 (다시 검색하지 않음 → 빠름)
+  function handleChangeSort(newSort: SortKey) {
     setSortBy(newSort);
-    if (hasSearched) handleSearch(keyword, newSort);
   }
 
   // [찜 토글] 저장소를 갱신하고 화면 상태(Set)도 갱신
@@ -139,7 +167,11 @@ export function ShoppingTab() {
     setFavoriteIds(new Set(next.map((f) => f.id)));
   }
 
-  // 제외 단어 문자열을 배열로 변환 ("중고, 리퍼" → ["중고","리퍼"])
+  // 쉼표로 구분된 문자열을 단어 배열로 변환 ("중고, 리퍼" → ["중고","리퍼"])
+  const includeWords = includeWordsInput
+    .split(",")
+    .map((w) => w.trim())
+    .filter(Boolean);
   const excludeWords = excludeWordsInput
     .split(",")
     .map((w) => w.trim())
@@ -147,8 +179,21 @@ export function ShoppingTab() {
 
   // 필터를 적용한 결과 (검색 결과가 바뀌거나 필터가 바뀔 때만 다시 계산)
   const filteredResults = useMemo(
-    () => applyShoppingFilters(searchResults, { excludeAccessory, maxPrice, excludeWords }),
-    [searchResults, excludeAccessory, maxPrice, excludeWordsInput],
+    () =>
+      applyShoppingFilters(searchResults, {
+        excludeAccessory,
+        minPrice,
+        maxPrice,
+        includeWords,
+        excludeWords,
+      }),
+    [searchResults, excludeAccessory, minPrice, maxPrice, includeWordsInput, excludeWordsInput],
+  );
+
+  // 정렬을 적용한 결과 (관련도순은 원래 순서 유지, 가격순은 화면에서 재정렬)
+  const sortedResults = useMemo(
+    () => sortResults(filteredResults, sortBy),
+    [filteredResults, sortBy],
   );
 
   // 스마트 추천 TOP3
@@ -157,8 +202,8 @@ export function ShoppingTab() {
     [filteredResults],
   );
 
-  // 화면에 실제로 보여줄 목록 (찜 모드면 찜 목록, 아니면 필터된 검색 결과)
-  const visibleResults = showFavoritesOnly ? getFavorites() : filteredResults;
+  // 화면에 실제로 보여줄 목록 (찜 모드면 찜 목록, 아니면 필터·정렬된 검색 결과)
+  const visibleResults = showFavoritesOnly ? getFavorites() : sortedResults;
 
   return (
     <div>
@@ -212,19 +257,21 @@ export function ShoppingTab() {
       {/* 필터/정렬 바 (검색 후 노출) */}
       {hasSearched && (
         <div className="filter-panel" style={{ marginTop: 12 }}>
+          {/* 정렬 (6종) */}
           <div className="chip-row" style={{ marginBottom: 8 }}>
-            <button
-              className={`chip ${sortBy === "relevance" ? "selected" : ""}`}
-              onClick={() => handleChangeSort("relevance")}
-            >
-              관련도순
-            </button>
-            <button
-              className={`chip ${sortBy === "priceAsc" ? "selected" : ""}`}
-              onClick={() => handleChangeSort("priceAsc")}
-            >
-              최저가순
-            </button>
+            <span className="filter-label">정렬</span>
+            {SORT_OPTIONS.map((option) => (
+              <button
+                key={option.key}
+                className={`chip ${sortBy === option.key ? "selected" : ""}`}
+                onClick={() => handleChangeSort(option.key)}
+              >
+                {option.label}
+              </button>
+            ))}
+          </div>
+          {/* 보기 옵션 */}
+          <div className="chip-row" style={{ marginBottom: 8 }}>
             <button
               className={`chip ${excludeAccessory ? "selected" : ""}`}
               onClick={() => setExcludeAccessory((v) => !v)}
@@ -238,13 +285,31 @@ export function ShoppingTab() {
               ⭐ 찜 {favoriteIds.size}
             </button>
           </div>
-          <div className="chip-row">
+          {/* 가격 범위 (하한 ~ 상한). 0이거나 비우면 그 방향 제한 없음 */}
+          <div className="chip-row" style={{ marginBottom: 8 }}>
             <input
               className="mini-input"
               type="number"
-              placeholder="가격 상한(원)"
+              placeholder="최소 가격(원)"
+              value={minPrice > 0 ? minPrice : ""}
+              onChange={(e) => setMinPrice(Number(e.target.value) || 0)}
+            />
+            <span className="price-sep">~</span>
+            <input
+              className="mini-input"
+              type="number"
+              placeholder="최대 가격(원)"
               value={maxPrice > 0 ? maxPrice : ""}
               onChange={(e) => setMaxPrice(Number(e.target.value) || 0)}
+            />
+          </div>
+          {/* 포함/제외 단어 (쉼표로 여러 개) */}
+          <div className="chip-row">
+            <input
+              className="mini-input wide"
+              placeholder="포함 단어 (모두 포함, 예: 정품,애플)"
+              value={includeWordsInput}
+              onChange={(e) => setIncludeWordsInput(e.target.value)}
             />
             <input
               className="mini-input wide"
@@ -484,4 +549,39 @@ function ShoppingResultCard({
 /** 숫자를 "1,000" 형태로 콤마 찍어 반환 */
 function formatPrice(price: number): string {
   return price.toLocaleString("ko-KR");
+}
+
+/**
+ * 결과 목록을 정렬 방식에 맞게 재정렬한다.
+ * - relevance: 원래 순서(다나와 관련도순) 유지
+ * - 그 외: 각 상품에서 "정렬값"을 뽑아 비교. 값이 없는 상품은 항상 맨 뒤로 보낸다.
+ *   (리뷰수·평점·등록월은 다나와 결과에만 있어, 정보 없는 상품은 뒤로 밀림)
+ */
+function sortResults(results: NormalizedResult[], sortBy: SortKey): NormalizedResult[] {
+  if (sortBy === "relevance") return results;
+
+  // 문자열 메타값을 숫자로 (없거나 이상하면 0)
+  const num = (v?: string) => {
+    const n = Number(v);
+    return Number.isFinite(n) ? n : 0;
+  };
+
+  // 정렬별 "정렬값 뽑기(getValue)"와 방향(direction: 1=오름차순, -1=내림차순)
+  const spec: Record<
+    Exclude<SortKey, "relevance">,
+    { getValue: (p: NormalizedResult) => number; direction: 1 | -1 }
+  > = {
+    priceAsc: { getValue: (p) => p.price, direction: 1 },
+    priceDesc: { getValue: (p) => p.price, direction: -1 },
+    reviewDesc: { getValue: (p) => num(p.meta?.reviewCount), direction: -1 },
+    ratingDesc: { getValue: (p) => num(p.meta?.rating), direction: -1 },
+    newest: { getValue: (p) => num(p.meta?.regYm), direction: -1 },
+  };
+
+  const { getValue, direction } = spec[sortBy];
+  // 정렬값이 있는 상품(>0)만 정렬하고, 없는 상품은 원래 순서로 맨 뒤에 붙인다.
+  const withValue = results.filter((p) => getValue(p) > 0);
+  const withoutValue = results.filter((p) => !(getValue(p) > 0));
+  withValue.sort((a, b) => (getValue(a) - getValue(b)) * direction);
+  return [...withValue, ...withoutValue];
 }
