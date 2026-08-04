@@ -299,15 +299,31 @@ interface MobilePlanFilter {
 
 ---
 
-## 10. 배포 (Vercel)
+## 10. 배포 (Vercel) — **배포 성공 (2026-08-04)**
 
-### 준비 완료 상태
+> 상세한 배포 트러블슈팅·재발방지 체크리스트는 별도 문서 **[VERCEL배포.md](./VERCEL배포.md)** 참고.
+
+### 배포 성공 설정
+- **호스팅**: Vercel (GitHub `main` 푸시 시 자동 배포)
+- **저장소**: https://github.com/bawo3/PriceWebSearcher
+- `vercel.json`: `{ "framework": "nextjs", "regions": ["icn1"] }`
+- `package.json` build: **`next build --webpack`** (Turbopack 아님)
+- 크롤링 라우트(collect/search/mall-prices): `export const maxDuration = 60`
+
+### 배포하며 겪은 문제 4가지 (→ VERCEL배포.md에 상세)
+| # | 증상 | 해결 |
+|---|---|---|
+| ① | `functions 패턴이 안 맞음` | vercel.json `functions` 제거 → 라우트에 `export const maxDuration` |
+| ② | 빌드 시 타입 에러(dev는 통과) | cheerio 타입 수정 + **푸시 전 `npm run build` 필수** |
+| ③ | "Collecting page data"에서 멈춤 | Turbopack → **webpack 빌드**(`next build --webpack`) |
+| ④ | "No Output Directory named public" | vercel.json에 **`"framework": "nextjs"`** |
+
+### 준비 상태 (아키텍처 관점)
 - 🛒 쇼핑: stateless (파일 안 씀) → ✅
 - 📱 알뜰폰: 옵션 C로 전환 (파일 안 씀) → ✅
-- `vercel.json`: 서울 리전(icn1) + 함수 60초
 
-### 남은 리스크 ⚠️
-- **다나와가 Vercel IP(데이터센터)를 차단할 가능성** — 배포 후 실테스트 필요 (집 IP는 정상)
+### 런타임 리스크 ⚠️
+- **다나와가 Vercel IP(데이터센터)를 차단할 가능성** — 빌드 성공 ≠ 실사용 성공. 물건 검색이 실제로 되는지 확인 필요 (집 IP는 정상)
 - **인메모리 캐시 효과 감소** — 서버리스는 요청마다 메모리 초기화 (동작엔 지장 없음)
 - **Vercel 무료(Hobby)는 비상업용만** — 사용자 대상 서비스는 Pro 필요
 
