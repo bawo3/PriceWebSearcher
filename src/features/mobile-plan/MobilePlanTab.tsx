@@ -11,6 +11,7 @@ import { useMemo, useState } from "react";
 import type { MobilePlan, MobilePlanFilter } from "@/shared/types";
 import { UNLIMITED_MONTHS } from "@/shared/types";
 import { filterAndSort } from "./filter";
+import { buildCrossComparison } from "./cross-compare";
 
 /** 통신사 선택지 */
 const CARRIERS = ["SKT", "KT", "LGU+"] as const;
@@ -36,6 +37,10 @@ export function MobilePlanTab() {
   const [smsUnlimitedOnly, setSmsUnlimitedOnly] = useState(false);
   const [discountSlider, setDiscountSlider] = useState(0); // 0=전체, 1~12=N개월↑, 13=무제한
   const [sortBy, setSortBy] = useState<"priceAsc" | "pricePerGbAsc">("priceAsc");
+  const [showCrossCompare, setShowCrossCompare] = useState(false); // 사이트 교차 비교 모드
+
+  // 여러 사이트에 걸친 "동일 조건" 요금제의 가격 차이 (아낄 수 있는 금액 큰 순)
+  const crossGroups = useMemo(() => buildCrossComparison(allPlans), [allPlans]);
 
   // 슬라이더 값 → 필터용 "최소 할인 개월"로 변환
   const minDiscountMonths = useMemo(() => {
@@ -220,18 +225,60 @@ export function MobilePlanTab() {
         </div>
       </div>
 
+      {/* 동일 조건 최저가 비교 토글 (같은 조건인데 사이트·요금제마다 가격이 다를 때만) */}
+      {collectedAt && crossGroups.length > 0 && (
+        <button
+          className={`chip ${showCrossCompare ? "selected" : ""}`}
+          style={{ marginBottom: 10 }}
+          onClick={() => setShowCrossCompare((v) => !v)}
+        >
+          🔀 동일 조건 최저가 비교 {crossGroups.length}건 {showCrossCompare ? "▴" : "▾"}
+        </button>
+      )}
+
+      {/* 동일 조건 최저가 섹션: 같은 조건(통신망·데이터·통화·문자·속도)의 요금제를
+          여러 사이트에서 묶어, 최저가와 가격차를 보여준다 */}
+      {showCrossCompare &&
+        crossGroups.slice(0, 30).map((group, index) => (
+          <div key={index} className="cross-card">
+            <div className="cross-head">
+              <span className="cross-name">{group.specLabel}</span>
+              <span className="cross-save">최대 {group.savings.toLocaleString("ko-KR")}원 차이</span>
+            </div>
+            <div className="cross-spec">
+              같은 조건 요금제 {group.plans.length}개 · {group.sources.length}개 사이트
+            </div>
+            <div className="cross-rows">
+              {group.plans.map((p, i) => (
+                <div key={i} className={`cross-row ${p === group.cheapest ? "best" : ""}`}>
+                  <span className="badge">{p.source}</span>
+                  <span className="cross-planname">{p.planName}</span>
+                  <span className="cross-price">{p.price.toLocaleString("ko-KR")}원</span>
+                  {p === group.cheapest && <span className="best-badge">🏆 최저</span>}
+                  {p.sourceUrl && (
+                    <a href={p.sourceUrl} target="_blank" rel="noreferrer">
+                      이동 →
+                    </a>
+                  )}
+                </div>
+              ))}
+            </div>
+          </div>
+        ))}
+
       {/* 결과 요약 */}
-      {collectedAt && (
+      {collectedAt && !showCrossCompare && (
         <p className="info-text">
           조건에 맞는 요금제 {matchedPlans.length}건 (전체 {allPlans.length}건) · 마지막 수집:{" "}
           {formatDate(collectedAt)}
         </p>
       )}
 
-      {/* 요금제 목록 (최대 200개까지만 렌더) */}
-      {matchedPlans.slice(0, 200).map((plan) => (
-        <MobilePlanCard key={plan.id} plan={plan} />
-      ))}
+      {/* 요금제 목록 (최대 200개까지만 렌더, 교차비교 모드가 아닐 때) */}
+      {!showCrossCompare &&
+        matchedPlans.slice(0, 200).map((plan) => (
+          <MobilePlanCard key={plan.id} plan={plan} />
+        ))}
     </div>
   );
 }

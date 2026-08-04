@@ -36,9 +36,11 @@ const KNOWN_MALLS = [
 /** 몰별 가격 한 줄 */
 export interface MallPrice {
   mall: string; // 판매몰 이름 (쿠팡, 11번가, G마켓, 옥션 ...)
-  price: number; // 판매 가격(원)
+  price: number; // 상품 가격(원)
   url?: string; // 해당 몰로 가는 링크 (다나와 경유)
-  delivery?: string; // 배송 정보 (무료배송/빠른배송 등)
+  delivery?: string; // 배송 문구 ("무료배송" / "배송비 별도")
+  isFreeDelivery?: boolean; // 무료배송 여부
+  totalPrice?: number; // 실구매가 (무료배송이면 상품가와 동일)
 }
 
 /**
@@ -79,14 +81,13 @@ export async function fetchDanawaMallPrices(
     // 링크: 행 안의 첫 번째 a 태그 (다나와가 몰로 연결하는 링크)
     const url = row.find("a[href]").first().attr("href");
 
-    // 배송 정보 (있으면)
-    const delivery = /무료배송/.test(rowText)
-      ? "무료배송"
-      : /빠른배송/.test(rowText)
-        ? "빠른배송"
-        : undefined;
+    // 배송비: "무료배송"이면 무료, 아니면 금액 미표기라 "배송비 별도"로 구분해 표시
+    const isFreeDelivery = /무료배송/.test(rowText);
+    const delivery = isFreeDelivery ? "무료배송" : "배송비 별도";
+    // 실구매가: 무료배송이면 상품가 그대로, 유료(별도)면 배송비를 알 수 없어 상품가 기준
+    const totalPrice = price; // (배송비 금액이 명시되지 않아 상품가를 실구매가로 둠)
 
-    mallPrices.push({ mall, price, url, delivery });
+    mallPrices.push({ mall, price, url, delivery, isFreeDelivery, totalPrice });
   });
 
   // [스텝 4] 같은 몰+같은 가격 중복 제거 (다나와가 옵션별로 같은 값을 여러 번 노출)

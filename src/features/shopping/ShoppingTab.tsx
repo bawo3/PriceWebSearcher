@@ -277,12 +277,24 @@ export function ShoppingTab() {
           <div className="reco-head">✨ 스마트 추천</div>
           <div className="reco-grid">
             {recommendations.map((r) => (
-              <div key={r.product.id} className="reco-card">
+              // 카드 전체를 링크로 → 클릭하면 상품 페이지가 새 탭으로 열림
+              <a
+                key={r.product.id}
+                className="reco-card"
+                href={r.product.url}
+                target="_blank"
+                rel="noreferrer"
+              >
                 <span className={`reco-tag tag-${r.tag}`}>{r.tag}</span>
+                {/* 썸네일 — 텍스트만으론 뭔지 몰라서 이미지도 함께 */}
+                {r.product.meta?.image && (
+                  <img className="reco-thumb" src={r.product.meta.image} alt="" loading="lazy" />
+                )}
                 <div className="reco-title">{r.product.title}</div>
                 <div className="reco-price">{formatPrice(r.product.price)}원</div>
                 <div className="reco-reason">{r.reason}</div>
-              </div>
+                <div className="reco-open">클릭해서 상품 보기 →</div>
+              </a>
             ))}
           </div>
         </div>
@@ -322,6 +334,8 @@ interface MallPrice {
   price: number;
   url?: string;
   delivery?: string;
+  isFreeDelivery?: boolean;
+  totalPrice?: number;
 }
 
 /** 상품 결과 카드 하나 */
@@ -449,7 +463,10 @@ function ShoppingResultCard({
               <span className="mall-name">{m.mall}</span>
               {/* 가장 싼 몰에 최저가 뱃지 */}
               {m.price === cheapestMallPrice && <span className="best-badge">🏆 최저가</span>}
-              {m.delivery && <span className="mall-delivery">{m.delivery}</span>}
+              {/* 배송비를 별도 칸으로 표시 (무료 = 초록, 별도 = 회색) */}
+              <span className={`ship-tag ${m.isFreeDelivery ? "free" : "paid"}`}>
+                {m.isFreeDelivery ? "🚚 무료배송" : "🚚 배송비 별도"}
+              </span>
               <span className="mall-price">{formatPrice(m.price)}원</span>
               {m.url && (
                 <a href={m.url} target="_blank" rel="noreferrer">
