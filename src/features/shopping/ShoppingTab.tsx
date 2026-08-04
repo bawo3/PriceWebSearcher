@@ -56,6 +56,7 @@ export function ShoppingTab() {
   const [maxPrice, setMaxPrice] = useState(0); // 가격 상한(0=제한없음)
   const [includeWordsInput, setIncludeWordsInput] = useState(""); // 포함 단어(쉼표 구분)
   const [excludeWordsInput, setExcludeWordsInput] = useState(""); // 제외 단어(쉼표 구분)
+  const [showOptions, setShowOptions] = useState(true); // 검색 옵션 패널 열림 여부(검색 전에도 노출)
 
   // --- 찜 상태 ---
   const [favoriteIds, setFavoriteIds] = useState<Set<string>>(new Set());
@@ -161,6 +162,11 @@ export function ShoppingTab() {
     setSortBy(newSort);
   }
 
+  // [옵션 입력칸에서 Enter] 현재 검색어 + 지금 설정한 옵션으로 바로 검색
+  function handleOptionKeyDown(e: React.KeyboardEvent<HTMLInputElement>) {
+    if (e.key === "Enter") handleSearch();
+  }
+
   // [찜 토글] 저장소를 갱신하고 화면 상태(Set)도 갱신
   function handleToggleFavorite(product: NormalizedResult) {
     const next = toggleFavorite(product);
@@ -254,9 +260,16 @@ export function ShoppingTab() {
         </div>
       )}
 
-      {/* 필터/정렬 바 (검색 후 노출) */}
-      {hasSearched && (
-        <div className="filter-panel" style={{ marginTop: 12 }}>
+      {/* 검색 옵션 열기/접기 토글 — 검색 전에도 조건을 먼저 정할 수 있다 */}
+      <div className="chip-row" style={{ marginTop: 12 }}>
+        <button className="chip" onClick={() => setShowOptions((v) => !v)}>
+          🔧 검색 옵션 {showOptions ? "▴" : "▾"}
+        </button>
+      </div>
+
+      {/* 검색 옵션 패널 (검색 전/후 모두 노출). 여기서 정한 조건으로 검색·필터된다. */}
+      {showOptions && (
+        <div className="filter-panel" style={{ marginTop: 8 }}>
           {/* 정렬 (6종) */}
           <div className="chip-row" style={{ marginBottom: 8 }}>
             <span className="filter-label">정렬</span>
@@ -293,6 +306,7 @@ export function ShoppingTab() {
               placeholder="최소 가격(원)"
               value={minPrice > 0 ? minPrice : ""}
               onChange={(e) => setMinPrice(Number(e.target.value) || 0)}
+              onKeyDown={handleOptionKeyDown}
             />
             <span className="price-sep">~</span>
             <input
@@ -301,6 +315,7 @@ export function ShoppingTab() {
               placeholder="최대 가격(원)"
               value={maxPrice > 0 ? maxPrice : ""}
               onChange={(e) => setMaxPrice(Number(e.target.value) || 0)}
+              onKeyDown={handleOptionKeyDown}
             />
           </div>
           {/* 포함/제외 단어 (쉼표로 여러 개) */}
@@ -310,12 +325,14 @@ export function ShoppingTab() {
               placeholder="포함 단어 (모두 포함, 예: 정품,애플)"
               value={includeWordsInput}
               onChange={(e) => setIncludeWordsInput(e.target.value)}
+              onKeyDown={handleOptionKeyDown}
             />
             <input
               className="mini-input wide"
               placeholder="제외 단어 (쉼표로 구분, 예: 중고,리퍼)"
               value={excludeWordsInput}
               onChange={(e) => setExcludeWordsInput(e.target.value)}
+              onKeyDown={handleOptionKeyDown}
             />
           </div>
         </div>
