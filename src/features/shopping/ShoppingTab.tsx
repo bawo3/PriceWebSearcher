@@ -15,10 +15,13 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import type { NormalizedResult } from "@/shared/types";
 import { MALL_SEARCH_LINKS } from "./mall-search-links";
 import { applyShoppingFilters, pickRecommendations } from "./helpers";
+import { buildComparison, computeValueScores, type Comparison } from "./analysis";
 import {
   addRecentKeyword,
+  getCompareList,
   getFavorites,
   getRecentKeywords,
+  saveCompareList,
   toggleFavorite,
 } from "./storage";
 
@@ -62,12 +65,18 @@ export function ShoppingTab() {
   const [favoriteIds, setFavoriteIds] = useState<Set<string>>(new Set());
   const [showFavoritesOnly, setShowFavoritesOnly] = useState(false); // 찜만 보기 모드
 
+  // --- 비교함 상태 (상품 정보 전체를 담아 localStorage 에 저장) ---
+  const [compareItems, setCompareItems] = useState<NormalizedResult[]>([]); // 비교 담은 상품 (최대 4)
+  const [showCompare, setShowCompare] = useState(false); // 비교표 열림 여부
+  const MAX_COMPARE = 4;
+
   const debounceTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  // 첫 렌더 시 저장된 찜/최근검색을 불러온다. (브라우저에서만 동작)
+  // 첫 렌더 시 저장된 찜/최근검색/비교함을 불러온다. (브라우저에서만 동작)
   useEffect(() => {
     setFavoriteIds(new Set(getFavorites().map((f) => f.id)));
     setRecentKeywords(getRecentKeywords());
+    setCompareItems(getCompareList());
   }, []);
 
   // [자동완성] 입력할 때마다 150ms 뒤 추천어 요청
@@ -173,6 +182,30 @@ export function ShoppingTab() {
     setFavoriteIds(new Set(next.map((f) => f.id)));
   }
 
+  // [비교 담기/취소] 최대 4개까지. 이미 담겼으면 빼고, 아니면 추가. (localStorage 도 갱신)
+  function handleToggleCompare(product: NormalizedResult) {
+    setCompareItems((prev) => {
+      const exists = prev.some((p) => p.id === product.id);
+      let next: NormalizedResult[];
+      if (exists) {
+        next = prev.filter((p) => p.id !== product.id); // 담기 취소
+      } else if (prev.length >= MAX_COMPARE) {
+        return prev; // 4개 초과는 무시 (변경 없음 → 저장도 안 함)
+      } else {
+        next = [...prev, product]; // 담기
+      }
+      saveCompareList(next);
+      return next;
+    });
+  }
+
+  // [비교함 비우기] 화면·저장소 모두 비운다.
+  function handleClearCompare() {
+    setCompareItems([]);
+    saveCompareList([]);
+    setShowCompare(false);
+  }
+
   // 쉼표로 구분된 문자열을 단어 배열로 변환 ("중고, 리퍼" → ["중고","리퍼"])
   const includeWords = includeWordsInput
     .split(",")
@@ -210,6 +243,15 @@ export function ShoppingTab() {
 
   // 화면에 실제로 보여줄 목록 (찜 모드면 찜 목록, 아니면 필터·정렬된 검색 결과)
   const visibleResults = showFavoritesOnly ? getFavorites() : sortedResults;
+
+  // 가성비 점수 — 현재 검색 결과 안에서 상대적으로 매긴다. (카드 배지에 표시)
+  const valueScores = useMemo(() => computeValueScores(filteredResults), [filteredResults]);
+
+  // 비교함에 담긴 상품 id 집합 (카드에서 "담김" 여부 빠르게 확인)
+  const compareIdSet = new Set(compareItems.map((p) => p.id));
+
+  // 비교 분석 결과 (2개 이상일 때만)
+  const comparison = compareItems.length >= 2 ? buildComparison(compareItems) : null;
 
   return (
     <div>
@@ -399,8 +441,56 @@ export function ShoppingTab() {
             item={item}
             isFavorite={favoriteIds.has(item.id)}
             onToggleFavorite={handleToggleFavorite}
+            score={valueScores.get(item.id)}
+            isComparing={compareIdSet.has(item.id)}
+            onToggleCompare={handleToggleCompare}
           />
         ))}
+
+      {/* 비교함 트레이 (담은 상품이 있을 때 화면 하단 고정) */}
+      {compareItems.length > 0 && (
+        <div className="compare-tray">
+          <span className="compare-tray-title">
+            ⚖️ 비교함 {compareItems.length}/{MAX_COMPARE}
+          </span>
+          <div className="compare-tray-items">
+            {compareItems.map((p) => (
+              <button
+                key={p.id}
+                className="compare-chip"
+                title={`${p.title} 빼기`}
+                onClick={() => handleToggleCompare(p)}
+              >
+                {p.meta?.image ? (
+                  <img src={p.meta.image} alt="" />
+                ) : (
+                  <span className="compare-chip-noimg">?</span>
+                )}
+                <span className="compare-chip-x">×</span>
+              </button>
+            ))}
+          </div>
+          <button
+            className="primary-button"
+            disabled={compareItems.length < 2}
+            onClick={() => setShowCompare(true)}
+          >
+            비교하기
+          </button>
+          <button className="chip" onClick={handleClearCompare}>
+            비우기
+          </button>
+        </div>
+      )}
+
+      {/* 비교 분석표 (모달) */}
+      {showCompare && comparison && (
+        <CompareModal
+          items={compareItems}
+          comparison={comparison}
+          onClose={() => setShowCompare(false)}
+        />
+      )}
 
       {/* 찜 모드인데 찜이 없을 때 안내 */}
       {showFavoritesOnly && visibleResults.length === 0 && (
@@ -425,13 +515,21 @@ function ShoppingResultCard({
   item,
   isFavorite,
   onToggleFavorite,
+  score,
+  isComparing,
+  onToggleCompare,
 }: {
   item: NormalizedResult;
   isFavorite: boolean;
   onToggleFavorite: (product: NormalizedResult) => void;
+  score?: number; // 가성비 점수(0~100). 없으면 미표시
+  isComparing: boolean; // 비교함에 담겼는지
+  onToggleCompare: (product: NormalizedResult) => void;
 }) {
   const pcode = item.meta?.pcode; // 다나와 상품만 몰별 비교 가능
   const imageUrl = item.meta?.image; // 썸네일
+  const rating = Number(item.meta?.rating) || 0; // 별점
+  const reviewCount = Number(item.meta?.reviewCount) || 0; // 리뷰 수
 
   const [mallPrices, setMallPrices] = useState<MallPrice[] | null>(null);
   const [isLoadingMalls, setIsLoadingMalls] = useState(false);
@@ -473,12 +571,28 @@ function ShoppingResultCard({
         <div className="card-body">
           <p className="result-title">{item.title}</p>
           <div className="result-meta">
+            {/* 가성비 점수 배지 — 가격·별점·리뷰를 종합한 상대 점수 */}
+            {typeof score === "number" && (
+              <span
+                className={`score-badge ${scoreClass(score)}`}
+                title="가성비 점수: 가격·별점·리뷰수를 종합해 이 검색 안에서 상대적으로 매긴 점수"
+              >
+                가성비 {score}
+              </span>
+            )}
             <span className={`badge ${item.isMock ? "mock" : ""}`}>{item.source}</span>
             {item.meta?.판매처 && <span>판매처: {item.meta.판매처}</span>}
             <span className="result-price">
               {formatPrice(item.price)}
               <span className="unit"> 원</span>
             </span>
+            {/* 별점·리뷰 수 (다나와 상품에만 있음) */}
+            {rating > 0 && (
+              <span className="rating-mini" title="별점 · 리뷰 수">
+                ★ {rating}
+                {reviewCount > 0 && ` · 리뷰 ${formatPrice(reviewCount)}`}
+              </span>
+            )}
             {/* 다나와 검색목록 가격은 '대표가'라, 몰별 상세엔 더 싼 곳이 있을 수 있음 */}
             {pcode && <span className="price-note" title="다나와 대표가 · 몰별 상세에 더 저렴한 곳이 있을 수 있어요">대표가</span>}
             {item.url && (
@@ -495,6 +609,13 @@ function ShoppingResultCard({
                     : "몰별 최저가 보기 ▾"}
               </button>
             )}
+            {/* 비교함 담기 / 담기 취소 */}
+            <button
+              className={`chip ${isComparing ? "selected" : ""}`}
+              onClick={() => onToggleCompare(item)}
+            >
+              {isComparing ? "✓ 담기 취소" : "⚖️ 비교 담기"}
+            </button>
           </div>
         </div>
 
@@ -566,6 +687,79 @@ function ShoppingResultCard({
 /** 숫자를 "1,000" 형태로 콤마 찍어 반환 */
 function formatPrice(price: number): string {
   return price.toLocaleString("ko-KR");
+}
+
+/** 가성비 점수 → 색상 등급 (70+ 초록 / 40+ 주황 / 그 외 회색) */
+function scoreClass(score: number): string {
+  if (score >= 70) return "high";
+  if (score >= 40) return "mid";
+  return "low";
+}
+
+/** 비교 분석표 모달 — 담은 상품들을 표로 나란히 비교 + 자동 총평 */
+function CompareModal({
+  items,
+  comparison,
+  onClose,
+}: {
+  items: NormalizedResult[];
+  comparison: Comparison;
+  onClose: () => void;
+}) {
+  return (
+    // 바깥(어두운 배경) 클릭 시 닫힘
+    <div className="compare-modal" onClick={onClose}>
+      {/* 안쪽 박스 클릭은 닫힘 전파 차단 */}
+      <div className="compare-box" onClick={(e) => e.stopPropagation()}>
+        <div className="compare-head">
+          <h3 className="compare-title">⚖️ 상품 비교 ({items.length})</h3>
+          <button className="chip" onClick={onClose}>
+            닫기 ✕
+          </button>
+        </div>
+
+        {/* 자동 총평 */}
+        <div className="compare-verdict">{comparison.verdict}</div>
+
+        {/* 비교표 (가로 스크롤) */}
+        <div className="compare-scroll">
+          <table className="compare-table">
+            <thead>
+              <tr>
+                <th className="row-label" />
+                {items.map((p) => (
+                  <th key={p.id}>
+                    {p.meta?.image && <img src={p.meta.image} alt="" loading="lazy" />}
+                    <div className="compare-name" title={p.title}>
+                      {p.title}
+                    </div>
+                    {p.url && (
+                      <a href={p.url} target="_blank" rel="noreferrer">
+                        보러가기 →
+                      </a>
+                    )}
+                  </th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {comparison.rows.map((row) => (
+                <tr key={row.key}>
+                  <td className="row-label">{row.label}</td>
+                  {row.cells.map((cell, index) => (
+                    <td key={`${row.key}-${cell.id}-${index}`} className={cell.isWinner ? "win" : ""}>
+                      {cell.isWinner && <span className="win-badge">🏆</span>}
+                      {cell.text}
+                    </td>
+                  ))}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  );
 }
 
 /**

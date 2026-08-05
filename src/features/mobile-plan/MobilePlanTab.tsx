@@ -7,11 +7,13 @@
 // - 필터: 통신사 / 소진 후 속도 / 통화·문자 무제한 / 할인 유지기간(슬라이더) / 정렬
 // =============================================================================
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import type { MobilePlan, MobilePlanFilter } from "@/shared/types";
 import { UNLIMITED_MONTHS } from "@/shared/types";
 import { filterAndSort } from "./filter";
 import { buildCrossComparison } from "./cross-compare";
+import { buildPlanComparison, computePlanScores, type PlanComparison } from "./analysis";
+import { getPlanCompareList, savePlanCompareList } from "./storage";
 
 /** 통신사 선택지 */
 const CARRIERS = ["SKT", "KT", "LGU+"] as const;
@@ -38,6 +40,36 @@ export function MobilePlanTab() {
   const [discountSlider, setDiscountSlider] = useState(0); // 0=전체, 1~12=N개월↑, 13=무제한
   const [sortBy, setSortBy] = useState<"priceAsc" | "pricePerGbAsc">("priceAsc");
   const [showCrossCompare, setShowCrossCompare] = useState(false); // 사이트 교차 비교 모드
+
+  // --- 비교함 상태 (요금제 전체를 담아 localStorage 에 저장) ---
+  const [compareItems, setCompareItems] = useState<MobilePlan[]>([]);
+  const [showCompare, setShowCompare] = useState(false);
+  const MAX_COMPARE = 4;
+
+  // 첫 렌더 시 저장된 비교함을 불러온다.
+  useEffect(() => {
+    setCompareItems(getPlanCompareList());
+  }, []);
+
+  // [비교 담기/취소] 최대 4개. (localStorage 도 갱신)
+  function handleToggleCompare(plan: MobilePlan) {
+    setCompareItems((prev) => {
+      const exists = prev.some((p) => p.id === plan.id);
+      let next: MobilePlan[];
+      if (exists) next = prev.filter((p) => p.id !== plan.id);
+      else if (prev.length >= MAX_COMPARE) return prev;
+      else next = [...prev, plan];
+      savePlanCompareList(next);
+      return next;
+    });
+  }
+
+  // [비교함 비우기]
+  function handleClearCompare() {
+    setCompareItems([]);
+    savePlanCompareList([]);
+    setShowCompare(false);
+  }
 
   // 여러 사이트에 걸친 "동일 조건" 요금제의 가격 차이 (아낄 수 있는 금액 큰 순)
   const crossGroups = useMemo(() => buildCrossComparison(allPlans), [allPlans]);
@@ -75,6 +107,13 @@ export function MobilePlanTab() {
     () => filterAndSort(allPlans, filter),
     [allPlans, filter],
   );
+
+  // 가성비 점수 — 조건에 맞는 요금제 안에서 상대적으로 매긴다. (카드 배지)
+  const planScores = useMemo(() => computePlanScores(matchedPlans), [matchedPlans]);
+
+  // 비교함에 담긴 id 집합 + 2개 이상일 때 비교 분석
+  const compareIdSet = new Set(compareItems.map((p) => p.id));
+  const comparison = compareItems.length >= 2 ? buildPlanComparison(compareItems) : null;
 
   // [가져오기] 버튼 클릭 → 즉시 크롤링 → 받은 요금제를 화면 상태에 저장
   async function handleCollect() {
@@ -274,8 +313,56 @@ export function MobilePlanTab() {
       {/* 요금제 목록 (최대 200개까지만 렌더, 교차비교 모드가 아닐 때) */}
       {!showCrossCompare &&
         matchedPlans.slice(0, 200).map((plan) => (
-          <MobilePlanCard key={plan.id} plan={plan} />
+          <MobilePlanCard
+            key={plan.id}
+            plan={plan}
+            score={planScores.get(plan.id)}
+            isComparing={compareIdSet.has(plan.id)}
+            onToggleCompare={handleToggleCompare}
+          />
         ))}
+
+      {/* 비교함 트레이 (담은 요금제가 있을 때 화면 하단 고정) */}
+      {compareItems.length > 0 && (
+        <div className="compare-tray">
+          <span className="compare-tray-title">
+            ⚖️ 비교함 {compareItems.length}/{MAX_COMPARE}
+          </span>
+          <div className="compare-tray-items">
+            {compareItems.map((p) => (
+              <button
+                key={p.id}
+                className="compare-plan-chip"
+                title={`${p.planName} 빼기`}
+                onClick={() => handleToggleCompare(p)}
+              >
+                <span className="badge">{p.source}</span>
+                <span className="compare-plan-name">{p.planName}</span>
+                <span className="compare-chip-x">×</span>
+              </button>
+            ))}
+          </div>
+          <button
+            className="primary-button"
+            disabled={compareItems.length < 2}
+            onClick={() => setShowCompare(true)}
+          >
+            비교하기
+          </button>
+          <button className="chip" onClick={handleClearCompare}>
+            비우기
+          </button>
+        </div>
+      )}
+
+      {/* 비교 분석표 (모달) */}
+      {showCompare && comparison && (
+        <PlanCompareModal
+          plans={compareItems}
+          comparison={comparison}
+          onClose={() => setShowCompare(false)}
+        />
+      )}
     </div>
   );
 }
@@ -288,11 +375,30 @@ function describeDiscountSlider(value: number): string {
 }
 
 /** 요금제 카드 하나 */
-function MobilePlanCard({ plan }: { plan: MobilePlan }) {
+function MobilePlanCard({
+  plan,
+  score,
+  isComparing,
+  onToggleCompare,
+}: {
+  plan: MobilePlan;
+  score?: number; // 가성비 점수(0~100)
+  isComparing: boolean; // 비교함에 담겼는지
+  onToggleCompare: (plan: MobilePlan) => void;
+}) {
   return (
     <div className="result-card">
       <p className="result-title">{plan.planName}</p>
       <div className="result-meta">
+        {/* 가성비 점수 배지 */}
+        {typeof score === "number" && (
+          <span
+            className={`score-badge ${scoreClass(score)}`}
+            title="가성비 점수: 원/GB·월요금·데이터량·할인유지를 종합해 상대적으로 매긴 점수"
+          >
+            가성비 {score}
+          </span>
+        )}
         <span className="badge">{plan.source}</span>
         {plan.carrier && <span>{plan.carrier}</span>}
         <span>{describeData(plan)}</span>
@@ -313,6 +419,84 @@ function MobilePlanCard({ plan }: { plan: MobilePlan }) {
             보러가기 →
           </a>
         )}
+        {/* 비교함 담기 / 담기 취소 */}
+        <button
+          className={`chip ${isComparing ? "selected" : ""}`}
+          onClick={() => onToggleCompare(plan)}
+        >
+          {isComparing ? "✓ 담기 취소" : "⚖️ 비교 담기"}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+/** 가성비 점수 → 색상 등급 (70+ 초록 / 40+ 주황 / 그 외 회색) */
+function scoreClass(score: number): string {
+  if (score >= 70) return "high";
+  if (score >= 40) return "mid";
+  return "low";
+}
+
+/** 요금제 비교 분석표 모달 */
+function PlanCompareModal({
+  plans,
+  comparison,
+  onClose,
+}: {
+  plans: MobilePlan[];
+  comparison: PlanComparison;
+  onClose: () => void;
+}) {
+  return (
+    <div className="compare-modal" onClick={onClose}>
+      <div className="compare-box" onClick={(e) => e.stopPropagation()}>
+        <div className="compare-head">
+          <h3 className="compare-title">⚖️ 요금제 비교 ({plans.length})</h3>
+          <button className="chip" onClick={onClose}>
+            닫기 ✕
+          </button>
+        </div>
+
+        {/* 자동 총평 */}
+        <div className="compare-verdict">{comparison.verdict}</div>
+
+        {/* 비교표 (가로 스크롤) */}
+        <div className="compare-scroll">
+          <table className="compare-table">
+            <thead>
+              <tr>
+                <th className="row-label" />
+                {plans.map((p) => (
+                  <th key={p.id}>
+                    <div className="compare-name" title={p.planName}>
+                      {p.planName}
+                    </div>
+                    <span className="badge">{p.source}</span>
+                    {p.sourceUrl && (
+                      <a href={p.sourceUrl} target="_blank" rel="noreferrer">
+                        보러가기 →
+                      </a>
+                    )}
+                  </th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {comparison.rows.map((row) => (
+                <tr key={row.key}>
+                  <td className="row-label">{row.label}</td>
+                  {row.cells.map((cell, index) => (
+                    <td key={`${row.key}-${cell.id}-${index}`} className={cell.isWinner ? "win" : ""}>
+                      {cell.isWinner && <span className="win-badge">🏆</span>}
+                      {cell.text}
+                    </td>
+                  ))}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
       </div>
     </div>
   );

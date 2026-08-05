@@ -9,6 +9,7 @@ import type { NormalizedResult } from "@/shared/types";
 
 const FAVORITES_KEY = "websearcher.favorites"; // 찜한 상품 목록
 const RECENT_KEY = "websearcher.recentKeywords"; // 최근 검색어 목록
+const COMPARE_KEY = "websearcher.compare"; // 비교함에 담은 상품 목록
 
 /** localStorage 에서 JSON 을 안전하게 읽는다. (없거나 깨지면 기본값) */
 function readJson<T>(key: string, fallback: T): T {
@@ -53,6 +54,19 @@ export function toggleFavorite(product: NormalizedResult): NormalizedResult[] {
     : [product, ...current]; // 맨 앞에 추가
   writeJson(FAVORITES_KEY, next);
   return next;
+}
+
+// -----------------------------------------------------------------------------
+// 비교함 관리 (localStorage 에 상품 정보 전체를 저장 → 새로고침해도 유지)
+// -----------------------------------------------------------------------------
+/** 비교함에 담긴 상품 전체를 반환한다. */
+export function getCompareList(): NormalizedResult[] {
+  return readJson<NormalizedResult[]>(COMPARE_KEY, []);
+}
+
+/** 비교함 목록을 통째로 저장한다. */
+export function saveCompareList(items: NormalizedResult[]): void {
+  writeJson(COMPARE_KEY, items);
 }
 
 // -----------------------------------------------------------------------------
